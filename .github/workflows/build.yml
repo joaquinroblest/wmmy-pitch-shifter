@@ -1,0 +1,52 @@
+name: Armar plugin (macOS)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar
+        run: >
+          cmake -B build -G Xcode
+          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+
+      - name: Compilar
+        run: cmake --build build --config Release --parallel 4 -- -quiet
+
+      - name: Firmar (ad-hoc)
+        run: |
+          ART=build/WMMYPitchShifter_artefacts/Release
+          codesign --force --deep --sign - "$ART/AU/WMMY Pitch Shifter.component"
+          codesign --force --deep --sign - "$ART/VST3/WMMY Pitch Shifter.vst3"
+          codesign --verify --verbose "$ART/AU/WMMY Pitch Shifter.component"
+
+      - name: Validar Audio Unit (auval)
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          rm -rf ~/Library/Audio/Plug-Ins/Components/"WMMY Pitch Shifter.component"
+          cp -R "build/WMMYPitchShifter_artefacts/Release/AU/WMMY Pitch Shifter.component" ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar || true
+          sleep 2
+          auval -a | grep -i wmmy || true
+          auval -strict -v aufx Wmps Wmmy
+
+      - name: Empaquetar
+        run: |
+          ART=build/WMMYPitchShifter_artefacts/Release
+          mkdir -p dist
+          ditto -c -k --keepParent "$ART/AU/WMMY Pitch Shifter.component" "dist/WMMY-Pitch-Shifter-AU.zip"
+          ditto -c -k --keepParent "$ART/VST3/WMMY Pitch Shifter.vst3" "dist/WMMY-Pitch-Shifter-VST3.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wmmy-pitch-shifter-macos
+          path: dist/*.zip
+          retention-days: 30

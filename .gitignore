@@ -1,0 +1,4 @@
+build/
+dist/
+*.f32
+.DS_Store
