@@ -56,11 +56,15 @@ WmmyPitchShifterProcessor::WmmyPitchShifterProcessor()
     outputParam = apvts.getRawParameterValue (idOutput);
 
     apvts.addParameterListener (idMode, this);
+    apvts.addParameterListener (idTranspose, this);
+    apvts.addParameterListener (idStep, this);
 }
 
 WmmyPitchShifterProcessor::~WmmyPitchShifterProcessor()
 {
     apvts.removeParameterListener (idMode, this);
+    apvts.removeParameterListener (idTranspose, this);
+    apvts.removeParameterListener (idStep, this);
     cancelPendingUpdate();
 }
 
@@ -72,12 +76,17 @@ bool WmmyPitchShifterProcessor::isBusesLayoutSupported (const BusesLayout& layou
     return layouts.getMainInputChannelSet() == out;
 }
 
-double WmmyPitchShifterProcessor::currentPitchScale() const
+float WmmyPitchShifterProcessor::currentSemitones() const
 {
     float st = transposeParam->load();
     if (stepParam->load() > 0.5f)
         st = std::round (st);
-    return std::pow (2.0, (double) st / 12.0);
+    return juce::jlimit (-24.0f, 24.0f, st);
+}
+
+double WmmyPitchShifterProcessor::currentPitchScale() const
+{
+    return std::pow (2.0, (double) currentSemitones() / 12.0);
 }
 
 int WmmyPitchShifterProcessor::engineLatency() const
@@ -85,6 +94,25 @@ int WmmyPitchShifterProcessor::engineLatency() const
     if (stretcher == nullptr)
         return 0;
     return (int) stretcher->getPreferredStartPad() + (int) stretcher->getStartDelay() + safetyMargin;
+}
+
+int WmmyPitchShifterProcessor::latencyForSemitones (float semitones) const
+{
+    const float pos = juce::jlimit (0.0f, 48.0f, semitones + 24.0f);
+    const int i = juce::jmin (47, (int) std::floor (pos));
+    const float frac = pos - (float) i;
+    return (int) std::lround ((1.0f - frac) * (float) latencyTable[(size_t) i]
+                              + frac * (float) latencyTable[(size_t) i + 1]);
+}
+
+void WmmyPitchShifterProcessor::updateReportedLatency()
+{
+    const int lat = latencyForSemitones (currentSemitones());
+    if (reportedLatency.exchange (lat) != lat)
+    {
+        pendingLatency.store (lat);
+        triggerAsyncUpdate();
+    }
 }
 
 void WmmyPitchShifterProcessor::prepareToPlay (double newSampleRate, int samplesPerBlock)
@@ -122,6 +150,18 @@ void WmmyPitchShifterProcessor::buildEngine()
     if (mode == 0)
         options |= RubberBandStretcher::OptionWindowShort; // modo Rapido
 
+    // Tabla de retrasos: se mide con un motor de prueba que nunca procesa audio.
+    {
+        RubberBandStretcher probe ((size_t) sampleRate, (size_t) numChannels, options, 1.0, 1.0);
+        probe.setMaxProcessSize ((size_t) maxBlock);
+        for (int i = 0; i <= 48; ++i)
+        {
+            probe.setPitchScale (std::pow (2.0, (double) (i - 24) / 12.0));
+            latencyTable[(size_t) i] = (int) probe.getPreferredStartPad()
+                                     + (int) probe.getStartDelay() + safetyMargin;
+        }
+    }
+
     appliedScale = currentPitchScale();
     stretcher = std::make_unique<RubberBandStretcher> ((size_t) sampleRate, (size_t) numChannels,
                                                        options, 1.0, appliedScale);
@@ -151,8 +191,10 @@ void WmmyPitchShifterProcessor::buildEngine()
         remaining -= len;
     }
 
-    reportedLatency = engineLatency();
-    setLatencySamples (reportedLatency);
+    const int lat = latencyForSemitones (currentSemitones());
+    reportedLatency.store (lat);
+    pendingLatency.store (-1);
+    setLatencySamples (lat);
 }
 
 void WmmyPitchShifterProcessor::pushToFifo (int)
@@ -197,13 +239,6 @@ void WmmyPitchShifterProcessor::processBlock (juce::AudioBuffer<float>& buffer, 
     {
         stretcher->setPitchScale (scale);
         appliedScale = scale;
-        const int lat = engineLatency();
-        if (lat != reportedLatency)
-        {
-            reportedLatency = lat;
-            pendingLatency.store (lat);
-            triggerAsyncUpdate(); // Logic se entera desde el hilo principal
-        }
     }
 
     // 2. Guardar la senal original (para la mezcla) y alimentar el motor.
@@ -232,7 +267,7 @@ void WmmyPitchShifterProcessor::processBlock (juce::AudioBuffer<float>& buffer, 
     // 3. Salida: senal procesada desde la cola + original alineada.
     mixSmoothed.setTargetValue (mixParam->load() / 100.0f);
     gainSmoothed.setTargetValue (juce::Decibels::decibelsToGain (outputParam->load()));
-    const int lat = reportedLatency;
+    const int lat = engineLatency(); // retraso real, para alinear la senal original
 
     for (int i = 0; i < n; ++i)
     {
@@ -262,6 +297,8 @@ void WmmyPitchShifterProcessor::parameterChanged (const juce::String& parameterI
 {
     if (parameterID == idMode)
         triggerAsyncUpdate();
+    else
+        updateReportedLatency(); // Transpose o Step: avisar a Logic de inmediato
 }
 
 void WmmyPitchShifterProcessor::handleAsyncUpdate()

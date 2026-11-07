@@ -5,6 +5,7 @@
 
 #include "rubberband/RubberBandStretcher.h"
 
+#include <array>
 #include <atomic>
 #include <memory>
 #include <vector>
@@ -55,7 +56,10 @@ private:
 
     void buildEngine();           // crea Rubber Band segun el modo (no tiempo real)
     double currentPitchScale() const;
-    int engineLatency() const;    // retraso total para la proporcion actual
+    float currentSemitones() const;
+    int engineLatency() const;    // retraso real del motor en este momento
+    int latencyForSemitones (float semitones) const; // desde la tabla precalculada
+    void updateReportedLatency(); // avisa a Logic si el retraso cambio
     void pushToFifo (int numSamples);
 
     double sampleRate = 48000.0;
@@ -68,8 +72,13 @@ private:
 
     std::unique_ptr<RubberBand::RubberBandStretcher> stretcher;
     double appliedScale = 1.0;
-    int reportedLatency = 0;
+    std::atomic<int> reportedLatency { 0 };
     std::atomic<int> pendingLatency { -1 };
+
+    // Retraso del motor para cada semitono entero de -24 a +24, calculado al
+    // crear el motor. Permite avisar a Logic apenas se mueve la perilla, sin
+    // esperar a que llegue audio (Logic no procesa pistas detenidas).
+    std::array<int, 49> latencyTable {};
 
     // Cola circular con la senal procesada.
     juce::AudioBuffer<float> fifo;
