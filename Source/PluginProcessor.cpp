@@ -14,9 +14,9 @@ const juce::String idOutput { "output" };
 
 // Margen anti-cortes para Rubber Band, en muestras a 48 kHz. Se obtuvo
 // simulando la cola del plugin con buferes de 32 a 2048 muestras
-// (tools/: prueba "exact"); es el minimo sin cortes en todos los casos.
-constexpr int marginRapido48k = 256;
-constexpr int marginCalidad48k = 256;
+// (prueba "exact2"): el peor caso necesita 92 muestras; se usa 128 por seguridad.
+constexpr int marginRapido48k = 128;
+constexpr int marginCalidad48k = 128;
 
 // Modo En vivo (a 48 kHz): ventana de analisis 2048, de sintesis 256,
 // solapamiento 8. Retraso medido alineando la envolvente: ~720 muestras (15 ms).
