@@ -18,9 +18,11 @@ El retraso depende del intervalo: es mayor al bajar el tono y menor al subirlo. 
 
 | Intervalo | En vivo | Rápido | Calidad |
 |---|---|---|---|
-| −12 | ≈ 15 ms | ≈ 85 ms | ≈ 133 ms |
-| 0 | ≈ 15 ms | ≈ 59 ms | ≈ 91 ms |
-| +12 | ≈ 21 ms | ≈ 45 ms | ≈ 70 ms |
+| −12 | ≈ 15 ms | ≈ 83 ms | ≈ 131 ms |
+| 0 | ≈ 15 ms | ≈ 56 ms | ≈ 88 ms |
+| +12 | ≈ 21 ms | ≈ 43 ms | ≈ 67 ms |
+
+Al instalar una versión nueva, hay que **cerrar Logic por completo** (no solo el proyecto) para que cargue el plugin actualizado.
 
 ## Cómo se arma
 
