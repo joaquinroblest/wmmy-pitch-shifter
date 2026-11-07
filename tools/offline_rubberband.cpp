@@ -27,7 +27,11 @@ int main (int argc, char** argv)
         in.insert (in.end(), tmp, tmp + n);
     std::fclose (f);
 
-    int opts = RubberBandStretcher::OptionProcessRealTime | RubberBandStretcher::OptionPitchHighConsistency;
+    int opts = RubberBandStretcher::OptionProcessRealTime;
+    const char* pm = argc > 6 ? argv[6] : "consistency";
+    opts |= std::strcmp (pm, "quality") == 0 ? RubberBandStretcher::OptionPitchHighQuality
+          : std::strcmp (pm, "speed") == 0   ? RubberBandStretcher::OptionPitchHighSpeed
+                                             : RubberBandStretcher::OptionPitchHighConsistency;
     opts |= r3 ? RubberBandStretcher::OptionEngineFiner : RubberBandStretcher::OptionEngineFaster;
     if (shortWin)
         opts |= RubberBandStretcher::OptionWindowShort;

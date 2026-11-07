@@ -16,3 +16,4 @@ The full license text is available at https://www.gnu.org/licenses/agpl-3.0.txt
 Third-party components:
 - Rubber Band Library, Copyright (C) Particular Programs Ltd, GPL v2 or later.
 - JUCE, Copyright (C) Raw Material Software Limited, AGPL v3.
+- stftPitchShift, Copyright (c) 2022 Juergen Hock, MIT License.

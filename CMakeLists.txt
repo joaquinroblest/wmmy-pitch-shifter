@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(WMMYPitchShifter VERSION 0.1.0)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(FetchContent)
@@ -21,6 +21,15 @@ FetchContent_Declare(
     GIT_TAG v4.0.0
     GIT_SHALLOW ON)
 FetchContent_MakeAvailable(rubberband)
+
+# stftPitchShift (MIT), motor del modo "En vivo". Solo se usan sus cabeceras,
+# por eso SOURCE_SUBDIR apunta a una carpeta sin CMakeLists (no se compila su CLI).
+FetchContent_Declare(
+    stftpitchshift
+    GIT_REPOSITORY https://github.com/jurihock/stftPitchShift.git
+    GIT_TAG 70c96db087458f8631edbc1bb4068d42ea5b52cc
+    SOURCE_SUBDIR solo-cabeceras)
+FetchContent_MakeAvailable(stftpitchshift)
 
 juce_add_plugin(WMMYPitchShifter
     COMPANY_NAME "WMMY"
@@ -42,7 +51,8 @@ target_sources(WMMYPitchShifter PRIVATE
     ${rubberband_SOURCE_DIR}/single/RubberBandSingle.cpp)
 
 target_include_directories(WMMYPitchShifter PRIVATE
-    ${rubberband_SOURCE_DIR})
+    ${rubberband_SOURCE_DIR}
+    ${stftpitchshift_SOURCE_DIR}/cpp)
 
 target_compile_definitions(WMMYPitchShifter PUBLIC
     JUCE_WEB_BROWSER=0

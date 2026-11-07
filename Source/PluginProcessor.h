@@ -3,6 +3,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
 
+#include "LiveEngine.h"
 #include "rubberband/RubberBandStretcher.h"
 
 #include <array>
@@ -10,11 +11,13 @@
 #include <memory>
 #include <vector>
 
-// Procesador del plugin: envuelve Rubber Band (motor R3) en tiempo real.
+// Procesador del plugin. Tres modos:
+//  - Rapido  (Rubber Band R3, ventana corta)
+//  - Calidad (Rubber Band R3, ventana estandar)
+//  - En vivo (stftPitchShift con ventana de sintesis corta, ~15 ms)
 //
-// Latencia: Rubber Band tiene un retraso que depende del intervalo
-// (mayor al bajar, menor al subir). El plugin lo informa a Logic con
-// setLatencySamples() cada vez que cambia, para que Logic lo compense.
+// Latencia: el plugin le informa a Logic el retraso real con
+// setLatencySamples(). En Rapido/Calidad depende del intervalo; en En vivo es fijo.
 class WmmyPitchShifterProcessor : public juce::AudioProcessor,
                                   private juce::AudioProcessorValueTreeState::Listener,
                                   private juce::AsyncUpdater
@@ -50,47 +53,55 @@ public:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     juce::AudioProcessorValueTreeState apvts;
 
+    enum Mode { modeRapido = 0, modeCalidad = 1, modeEnVivo = 2 };
+
 private:
     void parameterChanged (const juce::String& parameterID, float newValue) override;
     void handleAsyncUpdate() override;
 
-    void buildEngine();           // crea Rubber Band segun el modo (no tiempo real)
-    double currentPitchScale() const;
+    void buildEngine();             // crea el motor del modo actual (no tiempo real)
     float currentSemitones() const;
-    int engineLatency() const;    // retraso real del motor en este momento
-    int latencyForSemitones (float semitones) const; // desde la tabla precalculada
-    void updateReportedLatency(); // avisa a Logic si el retraso cambio
-    void pushToFifo (int numSamples);
+    double currentPitchScale() const;
+    int actualLatency() const;      // retraso real en este momento
+    int latencyForSemitones (float semitones) const;
+    void updateReportedLatency();
+    void pullFromRubberBand();
+
+    void processRubberBand (juce::AudioBuffer<float>& buffer, int numSamples, int chans);
+    void processLive (juce::AudioBuffer<float>& buffer, int numSamples, int chans);
 
     double sampleRate = 48000.0;
     int maxBlock = 512;
     int numChannels = 2;
     int activeMode = -1;
 
-    // Margen extra para que la cola de salida nunca quede vacia.
-    static constexpr int safetyMargin = 256;
-
+    // ---- Rubber Band (Rapido / Calidad) ----
     std::unique_ptr<RubberBand::RubberBandStretcher> stretcher;
     double appliedScale = 1.0;
+    int padSamples = 0;
+    int margin = 0;                 // margen anti-cortes del modo actual
+    std::array<int, 49> latencyTable {}; // retraso por semitono entero (-24..+24)
+
+    // Cola de salida con indices absolutos: la muestra de salida numero t es
+    // la muestra cruda numero t - pad - margen. Asi el retraso es exacto.
+    juce::AudioBuffer<float> raw;
+    int rawSize = 0;
+    juce::int64 rawWritten = 0;
+    juce::int64 outTime = 0;
+    juce::AudioBuffer<float> retrieveBuffer;
+    std::vector<float*> outPtrs;
+    std::vector<const float*> inPtrs;
+
+    // ---- En vivo ----
+    std::vector<wmmy::LiveChannel> live;
+    int liveLatency = 0;
+
+    // ---- Comun ----
     std::atomic<int> reportedLatency { 0 };
     std::atomic<int> pendingLatency { -1 };
 
-    // Retraso del motor para cada semitono entero de -24 a +24, calculado al
-    // crear el motor. Permite avisar a Logic apenas se mueve la perilla, sin
-    // esperar a que llegue audio (Logic no procesa pistas detenidas).
-    std::array<int, 49> latencyTable {};
-
-    // Cola circular con la senal procesada.
-    juce::AudioBuffer<float> fifo;
-    int fifoSize = 0, fifoRead = 0, fifoWrite = 0, fifoCount = 0;
-    juce::AudioBuffer<float> retrieveBuffer;
-
-    // Senal original retrasada, para mezclarla alineada (Mix < 100 %).
-    juce::AudioBuffer<float> dryDelay;
+    juce::AudioBuffer<float> dryDelay;  // senal original retrasada (Mix < 100 %)
     int dryWrite = 0, dryDelaySize = 0;
-
-    std::vector<float*> outPtrs;
-    std::vector<const float*> inPtrs;
 
     juce::SmoothedValue<float> mixSmoothed, gainSmoothed;
 
