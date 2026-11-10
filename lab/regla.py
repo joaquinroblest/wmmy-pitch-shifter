@@ -11,6 +11,7 @@ Medidas (menor es mejor en todas):
   ataque_p90_ms : idem, en el 10 % peor de los ataques
   preeco_db     : energia antes del ataque, respecto de la original
 """
+import os
 import sys
 
 import numpy as np
@@ -19,7 +20,15 @@ from scipy.signal import correlate, find_peaks, stft
 
 SR = 48000
 LAB = "/home/claude/lab"
-KEYS = ["retraso_ms", "espectro_db", "fantasma_db", "ataque_ms", "ataque_p90_ms", "preeco_db"]
+KEYS = ["retraso_ms", "espectro_db", "fantasma_db", "golpe_db", "golpe_p10_db", "desfase_ms", "jitter_ms", "preeco_db"]
+
+
+def flux(x):
+    """Funcion de deteccion de ataques: subida del espectro (ventana de 5 ms, paso 0,67 ms)."""
+    f, t, Z = stft(x, SR, nperseg=256, noverlap=256 - 32, window="hann", padded=False, boundary=None)
+    M = np.log1p(200.0 * np.abs(Z))
+    d = np.maximum(0.0, M[:, 4:] - M[:, :-4]).sum(0)
+    return d  # indice i  <->  muestra ~ (i + 4) * 32 + 128
 
 
 def env(x, ms):
@@ -43,6 +52,7 @@ class Data:
         pk, _ = find_peaks(ratio, height=3.0, distance=int(0.12 * SR))
         self.onsets = np.array([p for p in pk if fast[p] > 0.02 and int(0.1 * SR) < p < len(self.src) - int(0.2 * SR)])
         self.src_att = self.attack_stats(self.src)
+        self.src_flux = self.flux_stats(self.src)
         self.loglag = np.log(env(self.src, 5) + 1e-4)
         self.loglag -= self.loglag.mean()
 
@@ -63,6 +73,19 @@ class Data:
         lags = np.arange(-len(self.loglag) + 1, len(b))
         m = (lags > -int(0.02 * SR)) & (lags < int(max_ms / 1000 * SR))
         return int(lags[np.argmax(np.where(m, cc, -np.inf))])
+
+    def flux_stats(self, x):
+        """Para cada ataque: fuerza maxima de la subida y en que instante ocurre."""
+        fl = flux(x)
+        w = int(0.02 * SR / 32)
+        val, pos = [], []
+        for p in self.onsets:
+            i = int((p - 128) / 32) - 4
+            seg = fl[max(0, i - w): i + w]
+            j = int(np.argmax(seg))
+            val.append(seg[j])
+            pos.append((j - w) * 32 / SR * 1000)
+        return np.array(val), np.array(pos)
 
     def attack_stats(self, x):
         e = env(x, 1.5)
@@ -107,7 +130,7 @@ class Data:
             sustained &= ~((centers > p - int(0.07 * SR)) & (centers < p + int(0.10 * SR)))
         sel = act & sustained
         Cs, Rs = Cb[:, sel], Rb[:, sel]
-        floor = Rs.max(0, keepdims=True) * 1e-6
+        floor = Rs.max(0, keepdims=True) * 1e-4
         lsd = np.sqrt(np.mean((10 * np.log10((Cs + floor) / (Rs + floor))) ** 2, axis=0))
         out["espectro_db"] = round(float(np.mean(lsd)), 2)
         Rm = maximum_filter1d(Rs, size=9, axis=0)
@@ -116,8 +139,14 @@ class Data:
 
         rs, ps = self.src_att
         rc, pc = self.attack_stats(ca[: len(self.src)])
-        out["ataque_ms"] = round(float(np.median(rc - rs)), 2)
-        out["ataque_p90_ms"] = round(float(np.percentile(rc - rs, 90)), 2)
+        vs, ts = self.src_flux
+        vc, tc = self.flux_stats(ca[: len(self.src)])
+        g = 20 * np.log10((vc + 1e-9) / (vs + 1e-9))
+        out["golpe_db"] = round(float(np.median(g)), 1)
+        out["golpe_p10_db"] = round(float(np.percentile(g, 10)), 1)
+        dt = tc - ts
+        out["desfase_ms"] = round(float(np.median(dt)), 2)
+        out["jitter_ms"] = round(float(np.percentile(dt, 90) - np.percentile(dt, 10)), 2)
         out["preeco_db"] = round(float(np.median(pc - ps)), 1)
         return out
 
@@ -131,9 +160,9 @@ def spec(x):
 
 
 def show(rows, title=""):
-    print(f"\n{title:14s}" + "".join(f"{k:>15s}" for k in KEYS))
+    print(f"\n{title:14s}" + "".join(f"{k:>13s}" for k in KEYS))
     for name, m in rows:
-        print(f"{name:14s}" + "".join(f"{m[k]:>15}" for k in KEYS))
+        print(f"{name:14s}" + "".join(f"{m[k]:>13}" for k in KEYS))
 
 
 if __name__ == "__main__":
@@ -144,9 +173,12 @@ if __name__ == "__main__":
     for st in (-12, -5, 7, 12):
         rows = [("HyperTune", d.measure(d.ht(st), st))]
         p = f"{d.dir}/c_live_{st}.f32"
-        subprocess.run([f"{B}/offline_live", d.src_path, p, str(st)], check=True)
+        rows.append(("Referencia", d.measure(d.ref(st)[0], st)))
+        if not os.path.exists(p):
+            subprocess.run([f"{B}/offline_live", d.src_path, p, str(st)], check=True)
         rows.append(("EnVivo-v3", d.measure(rd(p), st)))
         p = f"{d.dir}/c_rapido_{st}.f32"
-        subprocess.run([f"{B}/offline_rb", d.src_path, p, str(st), "r3", "short"], check=True, capture_output=True)
+        if not os.path.exists(p):
+            subprocess.run([f"{B}/offline_rb", d.src_path, p, str(st), "r3", "short"], check=True, capture_output=True)
         rows.append(("Rapido", d.measure(rd(p), st)))
         show(rows, f"=== {st:+d}")

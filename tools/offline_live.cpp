@@ -1,7 +1,7 @@
 // Prueba fuera de linea del modo "En vivo" usando exactamente LiveEngine.h.
 // Uso: offline_live in.f32 out.f32 <semitonos> [analisis] [sintesis] [overlap]
 //      offline_live --impulse   (mide el retraso propio del motor)
-#include "../Source/LiveEngine.h"
+#include "LiveEngineV1.h"
 
 #include <cmath>
 #include <cstdio>

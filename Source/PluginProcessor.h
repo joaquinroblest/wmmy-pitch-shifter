@@ -3,7 +3,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
 
-#include "LiveEngine.h"
+#include "PeakEngine.h"
 #include "rubberband/RubberBandStretcher.h"
 
 #include <array>
@@ -14,7 +14,7 @@
 // Procesador del plugin. Tres modos:
 //  - Rapido  (Rubber Band R3, ventana corta)
 //  - Calidad (Rubber Band R3, ventana estandar)
-//  - En vivo (stftPitchShift con ventana de sintesis corta, ~15 ms)
+//  - En vivo / En vivo Ultra (motor de picos propio, 10,7 ms / 8 ms; ver PeakEngine.h)
 //
 // Latencia: el plugin le informa a Logic el retraso real con
 // setLatencySamples(). En Rapido/Calidad depende del intervalo; en En vivo es fijo.
@@ -53,7 +53,8 @@ public:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     juce::AudioProcessorValueTreeState apvts;
 
-    enum Mode { modeRapido = 0, modeCalidad = 1, modeEnVivo = 2 };
+    enum Mode { modeRapido = 0, modeCalidad = 1, modeEnVivo = 2, modeEnVivoUltra = 3 };
+    static bool isLiveMode (int m) { return m == modeEnVivo || m == modeEnVivoUltra; }
 
 private:
     void parameterChanged (const juce::String& parameterID, float newValue) override;
@@ -93,7 +94,7 @@ private:
     std::vector<const float*> inPtrs;
 
     // ---- En vivo ----
-    std::vector<wmmy::LiveChannel> live;
+    std::vector<wmmy::PeakChannel> live;
     int liveLatency = 0;
 
     // ---- Comun ----

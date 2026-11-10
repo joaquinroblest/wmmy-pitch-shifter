@@ -18,12 +18,12 @@ const juce::String idOutput { "output" };
 constexpr int marginRapido48k = 128;
 constexpr int marginCalidad48k = 128;
 
-// Modo En vivo (a 48 kHz): ventana de analisis 2048, de sintesis 256,
-// solapamiento 8. Retraso medido alineando la envolvente: ~720 muestras (15 ms).
-constexpr int liveAnalysis48k = 2048;
-constexpr int liveSynthesis48k = 256;
-constexpr int liveOverlap = 8;
-constexpr int liveLatency48k = 720;
+// Modos En vivo (a 48 kHz): motor de picos (Source/PeakEngine.h).
+// El retraso es el largo de la ventana de sintesis.
+constexpr int liveN48k = 4096;
+constexpr int liveR48k = 64;
+constexpr int liveS48k = 512;        // En vivo: 10,7 ms
+constexpr int liveUltraS48k = 384;   // En vivo Ultra: 8 ms
 } // namespace
 
 juce::AudioProcessorValueTreeState::ParameterLayout WmmyPitchShifterProcessor::createLayout()
@@ -41,7 +41,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout WmmyPitchShifterProcessor::c
 
     layout.add (std::make_unique<AudioParameterChoice> (
         ParameterID { idMode, 1 }, "Modo",
-        StringArray { String::fromUTF8 ("R\xc3\xa1pido"), "Calidad", "En vivo" }, 0));
+        StringArray { String::fromUTF8 ("R\xc3\xa1pido"), "Calidad", "En vivo", "En vivo Ultra" }, 2));
 
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { idMix, 1 }, "Mix",
@@ -104,7 +104,7 @@ double WmmyPitchShifterProcessor::currentPitchScale() const
 
 int WmmyPitchShifterProcessor::actualLatency() const
 {
-    if (activeMode == modeEnVivo)
+    if (isLiveMode (activeMode))
         return liveLatency;
     if (stretcher == nullptr)
         return 0;
@@ -113,7 +113,7 @@ int WmmyPitchShifterProcessor::actualLatency() const
 
 int WmmyPitchShifterProcessor::latencyForSemitones (float semitones) const
 {
-    if (activeMode == modeEnVivo)
+    if (isLiveMode (activeMode))
         return liveLatency;
     const float pos = juce::jlimit (0.0f, 48.0f, semitones + 24.0f);
     const int i = juce::jmin (47, (int) std::floor (pos));
@@ -166,18 +166,21 @@ void WmmyPitchShifterProcessor::buildEngine()
     // Factor para frecuencias de muestreo altas (88,2 / 96 kHz y mas).
     const int k = sampleRate > 60000.0 ? (sampleRate > 120000.0 ? 4 : 2) : 1;
 
-    if (mode == modeEnVivo)
+    if (isLiveMode (mode))
     {
         stretcher.reset();
+        wmmy::PeakChannel::Config cfg;
+        cfg.N = liveN48k * k;
+        cfg.R = liveR48k * k;
+        cfg.S = (mode == modeEnVivoUltra ? liveUltraS48k : liveS48k) * k;
         live.clear();
         live.resize ((size_t) numChannels);
         for (auto& ch : live)
         {
-            ch.prepare (sampleRate, (size_t) (liveAnalysis48k * k), (size_t) (liveSynthesis48k * k),
-                        (size_t) liveOverlap);
-            ch.setFactor (currentPitchScale());
+            ch.prepare (sampleRate, cfg);
+            ch.setRatio (currentPitchScale());
         }
-        liveLatency = liveLatency48k * k;
+        liveLatency = cfg.S;
     }
     else
     {
@@ -290,7 +293,7 @@ void WmmyPitchShifterProcessor::processLive (juce::AudioBuffer<float>& buffer, i
     for (int c = 0; c < chans; ++c)
     {
         auto& ch = live[(size_t) c];
-        ch.setFactor (scale);
+        ch.setRatio (scale);
         float* data = buffer.getWritePointer (c);
         for (int i = 0; i < n; ++i)
             data[i] = ch.processSample (data[i]);
@@ -306,7 +309,7 @@ void WmmyPitchShifterProcessor::processBlock (juce::AudioBuffer<float>& buffer, 
     for (int c = chans; c < buffer.getNumChannels(); ++c)
         buffer.clear (c, 0, n);
 
-    if (n == 0 || (activeMode == modeEnVivo ? live.empty() : stretcher == nullptr))
+    if (n == 0 || (isLiveMode (activeMode) ? live.empty() : stretcher == nullptr))
         return;
 
     // 1. Guardar la senal original para la mezcla.
@@ -324,7 +327,7 @@ void WmmyPitchShifterProcessor::processBlock (juce::AudioBuffer<float>& buffer, 
     dryWrite = (dryStart + n) % dryDelaySize;
 
     // 2. Cambio de tono (deja la senal procesada en 'buffer').
-    if (activeMode == modeEnVivo)
+    if (isLiveMode (activeMode))
         processLive (buffer, n, chans);
     else
         processRubberBand (buffer, n, chans);

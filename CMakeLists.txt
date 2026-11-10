@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(WMMYPitchShifter VERSION 0.3.0)
+project(WMMYPitchShifter VERSION 0.4.0)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,7 +22,7 @@ FetchContent_Declare(
     GIT_SHALLOW ON)
 FetchContent_MakeAvailable(rubberband)
 
-# stftPitchShift (MIT), motor del modo "En vivo". Solo se usan sus cabeceras,
+# stftPitchShift (MIT): se usa su transformada de Fourier en el motor "En vivo". Solo cabeceras,
 # por eso SOURCE_SUBDIR apunta a una carpeta sin CMakeLists (no se compila su CLI).
 FetchContent_Declare(
     stftpitchshift
